@@ -203,15 +203,21 @@ document.addEventListener('DOMContentLoaded', () => {
     resetCanvasBackground();
     hasDrawn = true;
     ctx.fillStyle = '#FFFFFF';
-    ctx.strokeStyle = '#FFFFFF';
-    ctx.font = 'bold 110px "Plus Jakarta Sans", sans-serif';
+    ctx.font = 'bold 96px "Plus Jakarta Sans", -apple-system, sans-serif';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    ctx.lineWidth = 14;
-    ctx.lineCap = 'round';
-    ctx.lineJoin = 'round';
-    ctx.strokeText(text, 320, 160);
-    ctx.fillText(text, 320, 160);
+
+    const totalChars = text.length;
+    // Spacing between characters so they do not fuse into one single blob
+    const charSpacing = totalChars > 2 ? 80 : 105;
+    const totalWidth = (totalChars - 1) * charSpacing;
+    const startX = 320 - totalWidth / 2;
+
+    for (let i = 0; i < totalChars; i++) {
+      const charX = startX + i * charSpacing;
+      ctx.fillText(text[i], charX, 160);
+    }
+
     saveCanvasState();
     showToast(`Loaded "${text}" sample on canvas. Click Recognize to test!`);
   }

@@ -130,11 +130,13 @@ def split_connected_box(box, binary_img):
     peak_right = np.max(profile[split_x:]) if split_x < w else 1
     min_peak = min(peak_left, peak_right)
 
-    # Strict valley ratio: must be a real bridge (< 0.40 of peak)
-    if min_peak > 0 and (min_val / float(min_peak) <= 0.40):
+    # Valley ratio: allows clear dip between touching handwritten numbers
+    # If the box is very wide (w / h >= 1.4), allow valley ratio <= 0.65
+    valley_threshold = 0.65 if (w / float(h) >= 1.4) else 0.45
+    if min_peak > 0 and (min_val / float(min_peak) <= valley_threshold):
         box1 = [x, y, split_x, h]
         box2 = [x + split_x, y, w - split_x, h]
-        return [box1, box2]
+        return [box1] + split_connected_box(box2, binary_img)
 
     return [box]
 
