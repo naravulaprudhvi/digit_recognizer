@@ -27,9 +27,6 @@ digit-recognizer/
 ├── requirements.txt        # Lightweight dependencies (FastAPI, Uvicorn, TensorFlow CPU)
 ├── digit_model.keras       # Pre-trained CNN model (~99.3% test accuracy)
 ├── render.yaml             # Render Blueprint configuration for 1-click deployment
-├── Procfile                # Web process definition for cloud hosts
-├── runtime.txt             # Python runtime specification (python-3.11.9)
-├── .python-version         # Python version pin (3.11.9)
 ├── templates/
 │   └── index.html          # Semantic HTML5 frontend with modern glassmorphism UI
 ├── static/
