@@ -9,6 +9,8 @@ background, centered by center-of-mass — same style as MNIST).
 Author: Naravula Prudhvi Sri Bhanu Vivek
 """
 
+import base64
+import io
 import cv2
 import numpy as np
 from PIL import Image
@@ -260,7 +262,7 @@ def preprocess_image(pil_image: Image.Image) -> np.ndarray:
 
 def pil_from_canvas_rgba(rgba_array: np.ndarray) -> Image.Image:
     """
-    Flatten Streamlit canvas RGBA array onto a black background and return PIL Image.
+    Flatten canvas RGBA array onto a black background and return PIL Image.
     """
     rgba = rgba_array.astype(np.uint8)
     rgb = rgba[:, :, :3]
@@ -268,4 +270,24 @@ def pil_from_canvas_rgba(rgba_array: np.ndarray) -> Image.Image:
     black_bg = np.zeros_like(rgb)
     composited = (rgb * alpha + black_bg * (1 - alpha)).astype(np.uint8)
     return Image.fromarray(composited)
+
+
+def pil_from_data_url(data_url: str) -> Image.Image:
+    """
+    Convert base64 data URL (e.g. from HTML5 canvas) to PIL Image.
+    """
+    if "," in data_url:
+        data_url = data_url.split(",", 1)[1]
+    image_bytes = base64.b64decode(data_url)
+    return Image.open(io.BytesIO(image_bytes))
+
+
+def pil_to_data_url(pil_img: Image.Image) -> str:
+    """
+    Convert a PIL Image to a base64 PNG data URL string.
+    """
+    buffered = io.BytesIO()
+    pil_img.save(buffered, format="PNG")
+    b64 = base64.b64encode(buffered.getvalue()).decode("utf-8")
+    return f"data:image/png;base64,{b64}"
 

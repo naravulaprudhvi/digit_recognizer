@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Handwritten Number Sequence Recognizer — AI Vision & CNN</title>
+  <meta name="description" content="Recognize handwritten single digits and multi-digit number sequences in natural reading order with a TensorFlow CNN and OpenCV segmentation." />
+
+  <!-- Google Fonts: Plus Jakarta Sans & JetBrains Mono -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@500;700;800&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+
+  <!-- Stylesheet -->
+  <link rel="stylesheet" href="/static/css/style.css" />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🔢</text></svg>" />
+</head>
+<body>
+  <div class="app-container">
+    <!-- Header -->
+    <header class="app-header">
+      <div class="brand-badge">
+        <span class="badge-pulse"></span>
+        <span>CNN Trained on MNIST &bull; Ready for Render</span>
+      </div>
+      <h1 class="app-title">Handwritten Number Recognizer</h1>
+      <p class="app-subtitle">
+        Draw numbers side-by-side or upload an image. The AI segments reading order
+        (top-to-bottom, left-to-right) and predicts each digit with high precision.
+      </p>
+    </header>
+
+    <!-- Main Navigation Tabs -->
+    <nav class="tabs-wrapper" aria-label="Input Method Selection">
+      <div class="nav-tabs">
+        <button type="button" id="tabDraw" class="tab-btn active">
+          <span>✍️</span>
+          <span>Draw Numbers</span>
+        </button>
+        <button type="button" id="tabUpload" class="tab-btn">
+          <span>📤</span>
+          <span>Upload Image</span>
+        </button>
+      </div>
+    </nav>
+
+    <!-- Primary Workspace -->
+    <main>
+      <!-- Mode 1: Interactive Drawing Canvas -->
+      <section id="drawSection" class="workspace-card" aria-label="Drawing Pad">
+        <div class="section-meta">
+          <div>
+            <h2 class="meta-title">Interactive Canvas</h2>
+            <p class="meta-desc">Draw single or multi-digit numbers with clear horizontal spacing.</p>
+          </div>
+        </div>
+
+        <div class="canvas-wrapper">
+          <canvas id="drawCanvas" aria-label="Handwritten digits drawing area"></canvas>
+        </div>
+
+        <!-- Canvas Toolbar -->
+        <div class="canvas-toolbar">
+          <div class="stroke-selector">
+            <span>Stroke:</span>
+            <div class="brush-sizes" role="group" aria-label="Brush Thickness">
+              <button type="button" class="brush-btn" data-size="10" title="Fine Stroke">
+                <span class="brush-dot sm"></span>
+              </button>
+              <button type="button" class="brush-btn active" data-size="18" title="Medium Stroke">
+                <span class="brush-dot md"></span>
+              </button>
+              <button type="button" class="brush-btn" data-size="26" title="Thick Stroke">
+                <span class="brush-dot lg"></span>
+              </button>
+            </div>
+          </div>
+
+          <div class="canvas-actions">
+            <button type="button" id="btnUndoCanvas" class="btn btn-secondary" title="Undo Last Stroke">
+              <span>↩️</span>
+              <span>Undo</span>
+            </button>
+            <button type="button" id="btnClearCanvas" class="btn btn-danger" title="Clear Canvas">
+              <span>🗑️</span>
+              <span>Clear</span>
+            </button>
+            <button type="button" id="btnPredictCanvas" class="btn btn-primary" title="Recognize Drawn Sequence">
+              <span>🔍</span>
+              <span>Recognize Sequence</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- Presets Bar -->
+        <div class="presets-container">
+          <span class="preset-label">Quick Examples:</span>
+          <button type="button" class="preset-chip" data-demo="2026">2026</button>
+          <button type="button" class="preset-chip" data-demo="42">42</button>
+          <button type="button" class="preset-chip" data-demo="789">789</button>
+          <button type="button" class="preset-chip" data-demo="5">5</button>
+        </div>
+      </section>
+
+      <!-- Mode 2: Image Upload Dropzone -->
+      <section id="uploadSection" class="workspace-card" style="display: none;" aria-label="Image Upload">
+        <div class="section-meta">
+          <div>
+            <h2 class="meta-title">Upload Handwritten Image</h2>
+            <p class="meta-desc">Upload a photo, scan, or drawing containing handwritten numbers.</p>
+          </div>
+        </div>
+
+        <!-- Dropzone -->
+        <div id="dropzone" class="dropzone-container" tabindex="0" role="button" aria-label="Click or drag image to upload">
+          <input type="file" id="imageInput" accept="image/png, image/jpeg, image/jpg, image/webp" style="display: none;" />
+          <span class="dropzone-icon">📸</span>
+          <h3 class="dropzone-title">Click to upload or drag & drop</h3>
+          <p class="dropzone-hint">Supports PNG, JPG, JPEG, and WebP (Max 10MB)</p>
+          <button type="button" class="btn btn-secondary" style="pointer-events: none;">
+            Browse Image
+          </button>
+        </div>
+
+        <!-- Image Preview Card -->
+        <div id="previewBox" class="preview-box">
+          <div class="preview-img-wrapper">
+            <img id="previewImage" alt="Uploaded Handwritten Document Preview" />
+          </div>
+          <div style="display: flex; gap: 0.75rem; justify-content: center; flex-wrap: wrap;">
+            <button type="button" id="btnChangeImage" class="btn btn-secondary">
+              <span>🔄</span>
+              <span>Choose Another</span>
+            </button>
+            <button type="button" id="btnPredictImage" class="btn btn-primary">
+              <span>🔍</span>
+              <span>Recognize Uploaded Image</span>
+            </button>
+          </div>
+        </div>
+      </section>
+
+      <!-- Results Display Section -->
+      <section id="resultsCard" class="results-card" aria-label="Prediction Results">
+        <div class="hero-prediction">
+          <div class="prediction-label">Recognized Sequence</div>
+          <div id="heroSequence" class="prediction-value">—</div>
+          <div class="metrics-strip">
+            <div class="metric-pill">
+              <span>Digits Detected:</span>
+              <strong id="statDigits">0</strong>
+            </div>
+            <div class="metric-pill">
+              <span>Avg Confidence:</span>
+              <strong id="statConfidence">0%</strong>
+            </div>
+            <div class="metric-pill">
+              <span>Inference Time:</span>
+              <strong id="statLatency">0 ms</strong>
+            </div>
+          </div>
+        </div>
+
+        <div>
+          <h3 class="breakdown-title">Segment Breakdown</h3>
+          <p class="breakdown-caption">
+            Individual digit segments processed and centered by center-of-mass (28x28 MNIST format):
+          </p>
+          <div id="linesContainer"></div>
+        </div>
+      </section>
+    </main>
+
+    <!-- Footer -->
+    <footer class="app-footer">
+      <p>
+        Built by <strong>Naravula Prudhvi Sri Bhanu Vivek</strong> &bull;
+        Powered by <strong>FastAPI</strong>, <strong>TensorFlow</strong>, and <strong>OpenCV</strong> &bull;
+        Deployed on <a href="https://render.com" target="_blank" rel="noopener noreferrer">Render</a>
+      </p>
+    </footer>
+  </div>
+
+  <!-- Client Script -->
+  <script src="/static/js/app.js"></script>
+</body>
+</html>

@@ -1,213 +1,197 @@
 """
 app.py
 ------
-Streamlit web app for Handwritten Digit & Number Sequence Recognition.
-
-Features:
-  1. Draw digits/numbers on an interactive canvas (horizontal & vertical reading order)
-  2. Upload an image of single or multi-digit handwritten numbers
-  3. Predicts number sequences ordered Top-to-Bottom and Left-to-Right
-  4. Provides line-by-line digit previews and confidence breakdowns.
+FastAPI production backend for Handwritten Number Sequence Recognizer.
+Replaces Streamlit with a high-performance, lightweight asynchronous API
+and modern HTML5/Vanilla CSS/JS user interface.
 
 Author: Naravula Prudhvi Sri Bhanu Vivek
 """
 
+import os
+import time
+from contextlib import asynccontextmanager
+from typing import Dict, List, Optional
+
 import numpy as np
-import streamlit as st
-from PIL import Image
 import tensorflow as tf
-from streamlit_drawable_canvas import st_canvas
+from fastapi import FastAPI, File, HTTPException, UploadFile
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel
+from PIL import Image
 
-from utils import segment_and_preprocess_image, pil_from_canvas_rgba
+from utils import pil_from_data_url, pil_to_data_url, segment_and_preprocess_image
 
-# ---------------------------------------------------------------
-# Page setup
-# ---------------------------------------------------------------
-st.set_page_config(
-    page_title="Handwritten Number Sequence Recognizer",
-    page_icon="🔢",
-    layout="centered",
+# ---------------------------------------------------------------------------
+# Global model holder
+# ---------------------------------------------------------------------------
+model = None
+MODEL_PATH = "digit_model.keras"
+
+
+def get_model():
+    global model
+    if model is None and os.path.exists(MODEL_PATH):
+        try:
+            model = tf.keras.models.load_model(MODEL_PATH)
+            print(f"[INFO] Successfully loaded model from {MODEL_PATH}")
+        except Exception as e:
+            print(f"[ERROR] Failed to load model: {e}")
+    return model
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Pre-warm model on startup
+    get_model()
+    yield
+
+
+app = FastAPI(
+    title="Handwritten Number Sequence Recognizer",
+    description="Recognizes handwritten numbers & sequences in reading order using a CNN trained on MNIST.",
+    version="2.0.0",
+    lifespan=lifespan,
 )
 
-st.title("🔢 Handwritten Number Sequence Recognizer")
-st.caption("Powered by a CNN trained on MNIST & Automated Top-to-Bottom, Left-to-Right Reading Order Segmentation")
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# Mount static folder
+os.makedirs("static/css", exist_ok=True)
+os.makedirs("static/js", exist_ok=True)
+os.makedirs("templates", exist_ok=True)
+app.mount("/static", StaticFiles(directory="static"), name="static")
 
 
-# ---------------------------------------------------------------
-# Load model once, cache it across reruns
-# ---------------------------------------------------------------
-@st.cache_resource
-def load_model():
-    return tf.keras.models.load_model("digit_model.keras")
+class CanvasPayload(BaseModel):
+    image: str  # Base64 data URL (e.g. data:image/png;base64,...)
 
 
-try:
-    model = load_model()
-    model_loaded = True
-except Exception as e:
-    model_loaded = False
-    st.error(
-        "Model file `digit_model.keras` not found. "
-        "Please run `python train_model.py` first to train and save the model."
-    )
-
-
-def predict_sequence(pil_image: Image.Image):
+def run_prediction_pipeline(pil_img: Image.Image) -> Dict:
     """
-    Extract top-to-bottom, left-to-right digit segments, run CNN prediction for each,
-    and return (sequence_string, digits_info_list).
+    Run segmentation, inference, and line grouping on any PIL image.
     """
-    segments = segment_and_preprocess_image(pil_image)
+    current_model = get_model()
+    if current_model is None:
+        raise HTTPException(
+            status_code=503,
+            detail="Model is not loaded. Ensure digit_model.keras is present."
+        )
+
+    start_time = time.time()
+    segments = segment_and_preprocess_image(pil_img)
+
     if not segments:
-        return None, []
+        return {
+            "success": False,
+            "message": "No digits detected. Please draw or upload clearer numbers with good contrast.",
+            "sequence": "",
+            "total_digits": 0,
+            "lines": [],
+            "latency_ms": round((time.time() - start_time) * 1000, 1),
+        }
 
     digits_info = []
     for item in segments:
-        probs = model.predict(item["tensor"], verbose=0)[0]
+        probs = current_model.predict(item["tensor"], verbose=0)[0]
         digit = int(np.argmax(probs))
         confidence = float(probs[digit])
+        preview_b64 = pil_to_data_url(item["preview_pil"])
+
         digits_info.append({
             "digit": digit,
-            "confidence": confidence,
-            "probs": probs,
-            "preview_pil": item["preview_pil"],
-            "bbox": item["bbox"],
-            "line_idx": item.get("line_idx", 0),
+            "confidence": round(confidence, 4),
+            "confidence_pct": round(confidence * 100, 1),
+            "probabilities": [round(float(p), 4) for p in probs],
+            "preview_base64": preview_b64,
+            "bbox": [int(v) for v in item["bbox"]],
+            "line_idx": int(item.get("line_idx", 0)),
         })
 
-    # Group by line_idx
-    lines_dict = {}
+    # Group by line index (Top-to-Bottom, Left-to-Right reading order)
+    lines_dict: Dict[int, List[Dict]] = {}
     for d in digits_info:
-        l_idx = d["line_idx"]
-        lines_dict.setdefault(l_idx, []).append(d)
+        lines_dict.setdefault(d["line_idx"], []).append(d)
 
-    line_strings = ["".join(str(d["digit"]) for d in digits) for digits in lines_dict.values()]
+    lines_output = []
+    line_strings = []
+    for idx_order, (line_idx, line_digits) in enumerate(lines_dict.items()):
+        line_str = "".join(str(d["digit"]) for d in line_digits)
+        line_strings.append(line_str)
+        lines_output.append({
+            "line_number": idx_order + 1,
+            "line_text": line_str,
+            "digits": line_digits,
+        })
+
     if len(line_strings) > 1:
-        line_formatted = [f"Line {idx + 1}: {s}" for idx, s in enumerate(line_strings)]
-        sequence_str = "  |  ".join(line_formatted)
+        formatted_seq = "  |  ".join(f"Line {idx + 1}: {s}" for idx, s in enumerate(line_strings))
     else:
-        sequence_str = line_strings[0] if line_strings else ""
+        formatted_seq = line_strings[0] if line_strings else ""
 
-    return sequence_str, digits_info
+    latency_ms = round((time.time() - start_time) * 1000, 1)
 
-
-def show_sequence_result(sequence_str: str, digits_info: list):
-    if not sequence_str or not digits_info:
-        st.warning("No digits detected in the image. Please draw clearly or upload a clearer image.")
-        return
-
-    st.success(f"### Predicted Reading Sequence: **{sequence_str}**")
-    st.metric(
-        label="Predicted Number / Sequence",
-        value=sequence_str,
-        delta=f"{len(digits_info)} digit(s) detected",
-    )
-
-    st.subheader("🔍 Line-by-Line Digit Breakdown")
-    st.caption("Segments detected in reading order (Top-to-Bottom, Left-to-Right):")
-
-    # Group digits by line
-    lines_dict = {}
-    for info in digits_info:
-        lines_dict.setdefault(info["line_idx"], []).append(info)
-
-    for line_order_idx, (line_idx, line_digits) in enumerate(lines_dict.items()):
-        line_val = "".join(str(d["digit"]) for d in line_digits)
-        st.markdown(f"### 📍 Line {line_order_idx + 1}: **{line_val}**")
-
-        num_digits = len(line_digits)
-        cols = st.columns(min(num_digits, 6))
-
-        for idx, info in enumerate(line_digits):
-            col = cols[idx % min(num_digits, 6)]
-            with col:
-                st.markdown(f"**Digit #{idx + 1}**")
-                st.image(info["preview_pil"], caption="28x28 crop (MNIST)", width=90)
-                st.markdown(f"### **{info['digit']}**")
-                st.caption(f"Conf: **{info['confidence'] * 100:.1f}%**")
-                with st.expander("Probabilities"):
-                    st.bar_chart({"Prob": info["probs"]}, height=140)
+    return {
+        "success": True,
+        "sequence": formatted_seq,
+        "raw_sequence": "".join(line_strings),
+        "total_digits": len(digits_info),
+        "lines": lines_output,
+        "latency_ms": latency_ms,
+    }
 
 
-# ---------------------------------------------------------------
-# Landing screen: choose an input method
-# ---------------------------------------------------------------
-if "mode" not in st.session_state:
-    st.session_state.mode = None
-
-if st.session_state.mode is None:
-    st.subheader("How would you like to provide numbers?")
-    col1, col2 = st.columns(2)
-    with col1:
-        if st.button("✍️ Write Now", use_container_width=True):
-            st.session_state.mode = "draw"
-            st.rerun()
-    with col2:
-        if st.button("📤 Upload an Image", use_container_width=True):
-            st.session_state.mode = "upload"
-            st.rerun()
-
-else:
-    if st.button("← Back to options"):
-        st.session_state.mode = None
-        st.rerun()
-
-    st.divider()
-
-    # -----------------------------------------------------------
-    # Mode 1: Draw on a wide pad
-    # -----------------------------------------------------------
-    if st.session_state.mode == "draw":
-        st.subheader("✍️ Draw digits / number sequence below")
-        st.caption("Draw digits horizontally or vertically (Top-to-Bottom, Left-to-Right) with clear spacing.")
-
-        canvas_result = st_canvas(
-            fill_color="white",
-            stroke_width=16,
-            stroke_color="white",
-            background_color="black",
-            height=320,
-            width=560,
-            drawing_mode="freedraw",
-            key="canvas",
-        )
-
-        col1, col2 = st.columns(2)
-        with col1:
-            predict_clicked = st.button("🔍 Predict Sequence", use_container_width=True,
-                                         disabled=not model_loaded)
-        with col2:
-            if st.button("🗑️ Clear", use_container_width=True):
-                st.rerun()
-
-        if predict_clicked:
-            if canvas_result.image_data is None or canvas_result.image_data[:, :, 3].max() == 0:
-                st.warning("Please draw at least one digit first.")
-            else:
-                pil_img = pil_from_canvas_rgba(canvas_result.image_data)
-                sequence_str, digits_info = predict_sequence(pil_img)
-                show_sequence_result(sequence_str, digits_info)
-
-    # -----------------------------------------------------------
-    # Mode 2: Upload an image
-    # -----------------------------------------------------------
-    elif st.session_state.mode == "upload":
-        st.subheader("📤 Upload an image of handwritten digits")
-        st.caption("Upload a photo or scan of single, multi-digit, or multi-line handwritten numbers.")
-
-        uploaded_file = st.file_uploader(
-            "Choose an image", type=["png", "jpg", "jpeg", "bmp", "webp"]
-        )
-
-        if uploaded_file is not None:
-            pil_img = Image.open(uploaded_file)
-            st.image(pil_img, caption="Uploaded Image", width=350)
-
-            if st.button("🔍 Predict Sequence", disabled=not model_loaded):
-                sequence_str, digits_info = predict_sequence(pil_img)
-                show_sequence_result(sequence_str, digits_info)
-
-st.divider()
-st.caption("Built by Naravula Prudhvi Sri Bhanu Vivek — MNIST CNN Digit & Sequence Recognizer")
+# ---------------------------------------------------------------------------
+# API Routes
+# ---------------------------------------------------------------------------
+@app.get("/")
+async def get_index():
+    index_path = os.path.join("templates", "index.html")
+    if os.path.exists(index_path):
+        return FileResponse(index_path)
+    return JSONResponse({"message": "Frontend template index.html not found"})
 
 
+@app.get("/health")
+@app.get("/api/health")
+async def health_check():
+    return {
+        "status": "healthy",
+        "model_loaded": get_model() is not None,
+        "framework": "FastAPI + Uvicorn",
+    }
+
+
+@app.post("/api/predict-canvas")
+async def predict_canvas(payload: CanvasPayload):
+    try:
+        pil_img = pil_from_data_url(payload.image)
+        return run_prediction_pipeline(pil_img)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Failed to process canvas drawing: {str(e)}")
+
+
+@app.post("/api/predict-image")
+async def predict_image(file: UploadFile = File(...)):
+    if not file.content_type.startswith("image/"):
+        raise HTTPException(status_code=400, detail="Uploaded file must be a valid image.")
+
+    try:
+        pil_img = Image.open(file.file)
+        return run_prediction_pipeline(pil_img)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Failed to process uploaded image: {str(e)}")
+
+
+if __name__ == "__main__":
+    import uvicorn
+    port = int(os.environ.get("PORT", 8000))
+    uvicorn.run("app:app", host="0.0.0.0", port=port, reload=True)
