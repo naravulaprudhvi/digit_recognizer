@@ -101,7 +101,10 @@ def run_prediction_pipeline(pil_img: Image.Image) -> Dict:
 
     digits_info = []
     for item in segments:
-        probs = current_model.predict(item["tensor"], verbose=0)[0]
+        p1 = current_model.predict(item["tensor"], verbose=0)[0]
+        p2 = current_model.predict(item.get("tensor_scaled", item["tensor"]), verbose=0)[0]
+        # Multi-scale ensemble: gives optimal weight to standard crop + scaled crop
+        probs = (p1 * 0.65 + p2 * 0.35)
         digit = int(np.argmax(probs))
         confidence = float(probs[digit])
         preview_b64 = pil_to_data_url(item["preview_pil"])

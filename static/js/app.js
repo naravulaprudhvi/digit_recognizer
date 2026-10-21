@@ -93,12 +93,14 @@ document.addEventListener('DOMContentLoaded', () => {
     };
   }
 
+  let strokePoints = [];
+
   function startDrawing(e) {
     e.preventDefault();
     isDrawing = true;
     hasDrawn = true;
     const coords = getCanvasCoords(e);
-    currentStroke = [coords];
+    strokePoints = [coords];
 
     ctx.strokeStyle = '#FFFFFF';
     ctx.fillStyle = '#FFFFFF';
@@ -117,17 +119,32 @@ document.addEventListener('DOMContentLoaded', () => {
     if (!isDrawing) return;
     e.preventDefault();
     const coords = getCanvasCoords(e);
-    currentStroke.push(coords);
+    strokePoints.push(coords);
 
-    ctx.lineTo(coords.x, coords.y);
-    ctx.stroke();
+    if (strokePoints.length >= 3) {
+      const prev = strokePoints[strokePoints.length - 2];
+      const curr = strokePoints[strokePoints.length - 1];
+      const midX = (prev.x + curr.x) / 2;
+      const midY = (prev.y + curr.y) / 2;
+      ctx.quadraticCurveTo(prev.x, prev.y, midX, midY);
+      ctx.stroke();
+    } else {
+      ctx.lineTo(coords.x, coords.y);
+      ctx.stroke();
+    }
   }
 
   function stopDrawing(e) {
     if (!isDrawing) return;
     isDrawing = false;
+    if (strokePoints.length >= 2) {
+      const last = strokePoints[strokePoints.length - 1];
+      ctx.lineTo(last.x, last.y);
+      ctx.stroke();
+    }
     ctx.closePath();
     saveCanvasState();
+    strokePoints = [];
   }
 
   // Mouse Listeners
@@ -186,12 +203,17 @@ document.addEventListener('DOMContentLoaded', () => {
     resetCanvasBackground();
     hasDrawn = true;
     ctx.fillStyle = '#FFFFFF';
-    ctx.font = 'bold 100px sans-serif';
+    ctx.strokeStyle = '#FFFFFF';
+    ctx.font = 'bold 110px "Plus Jakarta Sans", sans-serif';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
+    ctx.lineWidth = 14;
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    ctx.strokeText(text, 320, 160);
     ctx.fillText(text, 320, 160);
     saveCanvasState();
-    showToast(`Drew "${text}" sample on canvas. Click Recognize to test!`);
+    showToast(`Loaded "${text}" sample on canvas. Click Recognize to test!`);
   }
 
   // -------------------------------------------------------------------------
